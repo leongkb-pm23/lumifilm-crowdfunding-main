@@ -1,14 +1,24 @@
 import { ethers, BrowserProvider, Contract, parseEther, formatEther } from 'ethers';
-import { CROWDFUNDING_ABI, LUMI_TOKEN_ABI } from '@/contracts/abi';
+import { CROWDFUNDING_ABI, GOVERNANCE_VOTING_ABI, LUMI_TOKEN_ABI, MILESTONE_ESCROW_ABI } from '@/contracts/abi';
 
 const CROWDFUNDING_ADDRESS = import.meta.env.VITE_CROWDFUNDING_ADDRESS as string | undefined;
 const LUMI_TOKEN_ADDRESS = import.meta.env.VITE_LUMI_TOKEN_ADDRESS as string | undefined;
+const GOVERNANCE_VOTING_ADDRESS = import.meta.env.VITE_GOVERNANCE_VOTING_ADDRESS as string | undefined;
+const MILESTONE_ESCROW_ADDRESS = import.meta.env.VITE_MILESTONE_ESCROW_ADDRESS as string | undefined;
 
 export const GANACHE_CHAIN_ID = Number(import.meta.env.VITE_GANACHE_CHAIN_ID ?? 1337);
 const GANACHE_RPC_URL = (import.meta.env.VITE_GANACHE_RPC_URL as string | undefined) ?? 'http://127.0.0.1:7545';
 
 export function isBlockchainConfigured(): boolean {
   return Boolean(CROWDFUNDING_ADDRESS && LUMI_TOKEN_ADDRESS);
+}
+
+export function isGovernanceConfigured(): boolean {
+  return Boolean(isBlockchainConfigured() && GOVERNANCE_VOTING_ADDRESS);
+}
+
+export function isMilestoneEscrowConfigured(): boolean {
+  return Boolean(isBlockchainConfigured() && MILESTONE_ESCROW_ADDRESS);
 }
 
 export function isMetaMaskInstalled(): boolean {
@@ -36,6 +46,16 @@ function contractCrowdfunding(runner: ethers.ContractRunner): Contract {
 function contractLumiToken(runner: ethers.ContractRunner): Contract {
   if (!LUMI_TOKEN_ADDRESS) throw new Error('LUMI token address not configured.');
   return new Contract(LUMI_TOKEN_ADDRESS, LUMI_TOKEN_ABI, runner);
+}
+
+function contractGovernanceVoting(runner: ethers.ContractRunner): Contract {
+  if (!GOVERNANCE_VOTING_ADDRESS) throw new Error('Governance voting contract address not configured.');
+  return new Contract(GOVERNANCE_VOTING_ADDRESS, GOVERNANCE_VOTING_ABI, runner);
+}
+
+function contractMilestoneEscrow(runner: ethers.ContractRunner): Contract {
+  if (!MILESTONE_ESCROW_ADDRESS) throw new Error('Milestone escrow contract address not configured.');
+  return new Contract(MILESTONE_ESCROW_ADDRESS, MILESTONE_ESCROW_ABI, runner);
 }
 
 // ── MetaMask connection ───────────────────────────────────────────
@@ -114,6 +134,31 @@ export interface ChainCampaign {
   rejectionReason?: string;
 }
 
+export interface GovernanceProposal {
+  id: number;
+  campaignId: number;
+  title: string;
+  description: string;
+  deadline: number;
+  quorumWei: bigint;
+  executed: boolean;
+  passed: boolean;
+  forVotesWei: bigint;
+  againstVotesWei: bigint;
+}
+
+export interface Milestone {
+  id: number;
+  campaignId: number;
+  title: string;
+  details: string;
+  amountWei: bigint;
+  submitted: boolean;
+  approved: boolean;
+  released: boolean;
+  proofURI: string;
+}
+
 function parseStatus(code: number): ChainCampaignStatus {
   if (code === 0) return 'pending';
   if (code === 1) return 'active';
@@ -177,6 +222,91 @@ export async function queryReturnPool(campaignId: number): Promise<bigint> {
 
 export async function queryReturnClaimed(campaignId: number, address: string): Promise<bigint> {
   return BigInt(await contractCrowdfunding(getProvider()).returnsClaimed(campaignId, address));
+}
+
+function mapProposal(raw: {
+  id: bigint;
+  campaignId: bigint;
+  title: string;
+  description: string;
+  deadline: bigint;
+  quorumWei: bigint;
+  executed: boolean;
+  passed: boolean;
+  forVotes: bigint;
+  againstVotes: bigint;
+}): GovernanceProposal {
+  return {
+    id: Number(raw.id),
+    campaignId: Number(raw.campaignId),
+    title: raw.title,
+    description: raw.description,
+    deadline: Number(raw.deadline),
+    quorumWei: BigInt(raw.quorumWei),
+    executed: raw.executed,
+    passed: raw.passed,
+    forVotesWei: BigInt(raw.forVotes),
+    againstVotesWei: BigInt(raw.againstVotes),
+  };
+}
+
+function mapMilestone(raw: {
+  id: bigint;
+  campaignId: bigint;
+  title: string;
+  details: string;
+  amountWei: bigint;
+  submitted: boolean;
+  approved: boolean;
+  released: boolean;
+  proofURI: string;
+}): Milestone {
+  return {
+    id: Number(raw.id),
+    campaignId: Number(raw.campaignId),
+    title: raw.title,
+    details: raw.details,
+    amountWei: BigInt(raw.amountWei),
+    submitted: raw.submitted,
+    approved: raw.approved,
+    released: raw.released,
+    proofURI: raw.proofURI,
+  };
+}
+
+export async function fetchAllProposals(): Promise<GovernanceProposal[]> {
+  const contract = contractGovernanceVoting(getProvider());
+  const count = Number(await contract.proposalCount());
+  if (count === 0) return [];
+  const proposals = await Promise.all(
+    Array.from({ length: count }, (_, index) => contract.proposals(index + 1)),
+  );
+  return proposals.map(mapProposal);
+}
+
+export async function fetchCampaignProposals(campaignId: number): Promise<GovernanceProposal[]> {
+  const proposals = await fetchAllProposals();
+  return proposals.filter(proposal => proposal.campaignId === campaignId);
+}
+
+export async function queryProposalVoteStatus(proposalId: number, address: string): Promise<boolean> {
+  return Boolean(await contractGovernanceVoting(getProvider()).hasVoted(proposalId, address));
+}
+
+export async function fetchCampaignMilestones(campaignId: number): Promise<Milestone[]> {
+  const contract = contractMilestoneEscrow(getProvider());
+  const ids = await contract.getCampaignMilestones(campaignId) as bigint[];
+  if (ids.length === 0) return [];
+  const milestones = await Promise.all(ids.map(id => contract.milestones(id)));
+  return milestones.map(mapMilestone);
+}
+
+export async function queryEscrowBalance(campaignId: number): Promise<bigint> {
+  return BigInt(await contractMilestoneEscrow(getProvider()).escrowBalanceByCampaign(campaignId));
+}
+
+export async function queryAvailableEscrow(campaignId: number): Promise<bigint> {
+  return BigInt(await contractMilestoneEscrow(getProvider()).availableEscrow(campaignId));
 }
 
 export async function fetchUserContributedIds(address: string): Promise<number[]> {
@@ -243,6 +373,72 @@ export async function txClaimReturn(campaignId: number): Promise<void> {
   await (await contractCrowdfunding(signer).claimReturn(campaignId)).wait();
 }
 
+export async function txCreateProposal(
+  campaignId: number,
+  title: string,
+  description: string,
+  votingPeriodSeconds: number,
+  quorumEth: string,
+): Promise<void> {
+  const signer = await getSigner();
+  await (
+    await contractGovernanceVoting(signer).createProposal(
+      campaignId,
+      title,
+      description,
+      votingPeriodSeconds,
+      parseEther(quorumEth),
+    )
+  ).wait();
+}
+
+export async function txVoteOnProposal(proposalId: number, support: boolean): Promise<void> {
+  const signer = await getSigner();
+  await (await contractGovernanceVoting(signer).vote(proposalId, support)).wait();
+}
+
+export async function txExecuteProposal(proposalId: number): Promise<void> {
+  const signer = await getSigner();
+  await (await contractGovernanceVoting(signer).executeProposal(proposalId)).wait();
+}
+
+export async function txDepositEscrow(campaignId: number, amountEth: string): Promise<void> {
+  const signer = await getSigner();
+  await (await contractMilestoneEscrow(signer).depositEscrow(campaignId, { value: parseEther(amountEth) })).wait();
+}
+
+export async function txCreateMilestone(
+  campaignId: number,
+  title: string,
+  details: string,
+  amountEth: string,
+): Promise<void> {
+  const signer = await getSigner();
+  await (
+    await contractMilestoneEscrow(signer).createMilestone(
+      campaignId,
+      title,
+      details,
+      parseEther(amountEth),
+    )
+  ).wait();
+}
+
+export async function txSubmitMilestoneProof(milestoneId: number, proofURI: string): Promise<void> {
+  const signer = await getSigner();
+  await (await contractMilestoneEscrow(signer).submitMilestoneProof(milestoneId, proofURI)).wait();
+}
+
+export async function txApproveMilestone(milestoneId: number): Promise<void> {
+  const signer = await getSigner();
+  await (await contractMilestoneEscrow(signer).approveMilestone(milestoneId)).wait();
+}
+
+export async function txReleaseMilestone(milestoneId: number): Promise<void> {
+  const signer = await getSigner();
+  await (await contractMilestoneEscrow(signer).releaseMilestone(milestoneId)).wait();
+}
+
 // ── Helpers ───────────────────────────────────────────────────────
 
 export function weiToEth(wei: bigint): number {
@@ -264,6 +460,15 @@ export function formatError(err: unknown): string {
     if (err.message.includes('Funds not yet withdrawn')) return 'You must withdraw campaign funds before distributing returns.';
     if (err.message.includes('No returns available')) return 'No returns have been distributed yet.';
     if (err.message.includes('Nothing to claim')) return 'No new returns to claim.';
+    if (err.message.includes('Voting ended')) return 'This proposal is no longer open for voting.';
+    if (err.message.includes('Already voted')) return 'You have already voted on this proposal.';
+    if (err.message.includes('No contribution weight')) return 'Only contributors can vote on this proposal.';
+    if (err.message.includes('Campaign not successful')) return 'This action requires a successful campaign.';
+    if (err.message.includes('Insufficient escrow')) return 'There is not enough escrow balance for this milestone.';
+    if (err.message.includes('Proof not submitted')) return 'The creator has not submitted milestone proof yet.';
+    if (err.message.includes('Milestone not approved')) return 'This milestone must be approved first.';
+    if (err.message.includes('Not creator')) return 'Only the campaign creator can perform this action.';
+    if (err.message.includes('Proof required')) return 'Please provide a proof link or reference.';
     return err.message.slice(0, 120);
   }
   return 'An unknown error occurred.';

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ShieldCheck, CheckCircle, XCircle, Loader2, Clock, AlertCircle, FileText } from 'lucide-react';
+import { ShieldCheck, CheckCircle, XCircle, Loader2, Clock, AlertCircle, FileText, Vote, Landmark } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Layout } from '@/components/Layout';
@@ -11,12 +11,18 @@ import {
   formatETH,
   formatAddress,
   isBlockchainConfigured,
+  getStatusLabel,
   ROUTE_PATHS,
   type Campaign,
 } from '@/lib/index';
 import {
   fetchAllCampaigns,
+  fetchAllProposals,
+  isGovernanceConfigured,
+  isMilestoneEscrowConfigured,
   txApproveCampaign,
+  txCreateMilestone,
+  txCreateProposal,
   txRejectCampaign,
   formatError,
 } from '@/lib/blockchain';
@@ -24,20 +30,40 @@ import { printAdminCampaignReport } from '@/lib/reportGenerator';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 
 export default function AdminDashboard() {
   const { role, isConnected } = useWalletStore();
   const queryClient = useQueryClient();
   const chainEnabled = isBlockchainConfigured();
+  const governanceEnabled = isGovernanceConfigured();
+  const milestoneEnabled = isMilestoneEscrowConfigured();
   const [rejectingId, setRejectingId] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [txPending, setTxPending] = useState<number | null>(null);
+  const [proposalCampaignId, setProposalCampaignId] = useState('');
+  const [proposalTitle, setProposalTitle] = useState('');
+  const [proposalDescription, setProposalDescription] = useState('');
+  const [proposalVotingDays, setProposalVotingDays] = useState('3');
+  const [proposalQuorumEth, setProposalQuorumEth] = useState('1');
+  const [milestoneCampaignId, setMilestoneCampaignId] = useState('');
+  const [milestoneTitle, setMilestoneTitle] = useState('');
+  const [milestoneDetails, setMilestoneDetails] = useState('');
+  const [milestoneAmountEth, setMilestoneAmountEth] = useState('');
+  const [metaPending, setMetaPending] = useState<'proposal' | 'milestone' | null>(null);
 
   const { data: chainCampaigns, isLoading, error, refetch } = useQuery({
     queryKey: ['campaigns'],
     queryFn: fetchAllCampaigns,
     enabled: chainEnabled && isConnected && role === 'admin',
+    staleTime: 10_000,
+  });
+
+  const { data: proposals = [] } = useQuery({
+    queryKey: ['governance-proposals'],
+    queryFn: fetchAllProposals,
+    enabled: governanceEnabled && isConnected && role === 'admin',
     staleTime: 10_000,
   });
 
@@ -47,6 +73,8 @@ export default function AdminDashboard() {
 
   const allCampaigns: Campaign[] = (chainCampaigns ?? []).map(chainToFrontend);
   const pendingCampaigns = (chainCampaigns ?? []).filter(c => c.status === 'pending');
+  const approvedCampaigns = allCampaigns.filter(c => c.status !== 'pending' && c.status !== 'rejected');
+  const successfulCampaigns = allCampaigns.filter(c => c.status === 'successful');
 
   function handlePrintReport() {
     const opened = printAdminCampaignReport(allCampaigns);
@@ -86,6 +114,62 @@ export default function AdminDashboard() {
       toast.error(formatError(err));
     } finally {
       setTxPending(null);
+    }
+  }
+
+  async function handleCreateProposal() {
+    if (!proposalCampaignId || !proposalTitle.trim() || !proposalDescription.trim() || !proposalQuorumEth) {
+      toast.error('Fill in all proposal fields.');
+      return;
+    }
+
+    setMetaPending('proposal');
+    try {
+      await txCreateProposal(
+        Number(proposalCampaignId),
+        proposalTitle.trim(),
+        proposalDescription.trim(),
+        Math.max(1, Number(proposalVotingDays || '1')) * 24 * 60 * 60,
+        proposalQuorumEth,
+      );
+      await queryClient.invalidateQueries({ queryKey: ['governance-proposals'] });
+      toast.success('Governance proposal created.');
+      setProposalCampaignId('');
+      setProposalTitle('');
+      setProposalDescription('');
+      setProposalVotingDays('3');
+      setProposalQuorumEth('1');
+    } catch (err) {
+      toast.error(formatError(err));
+    } finally {
+      setMetaPending(null);
+    }
+  }
+
+  async function handleCreateMilestone() {
+    if (!milestoneCampaignId || !milestoneTitle.trim() || !milestoneDetails.trim() || !milestoneAmountEth) {
+      toast.error('Fill in all milestone fields.');
+      return;
+    }
+
+    setMetaPending('milestone');
+    try {
+      await txCreateMilestone(
+        Number(milestoneCampaignId),
+        milestoneTitle.trim(),
+        milestoneDetails.trim(),
+        milestoneAmountEth,
+      );
+      await queryClient.invalidateQueries({ queryKey: ['milestones', milestoneCampaignId] });
+      toast.success('Milestone created.');
+      setMilestoneCampaignId('');
+      setMilestoneTitle('');
+      setMilestoneDetails('');
+      setMilestoneAmountEth('');
+    } catch (err) {
+      toast.error(formatError(err));
+    } finally {
+      setMetaPending(null);
     }
   }
 
@@ -255,6 +339,86 @@ export default function AdminDashboard() {
                   })}
                 </div>
               )}
+
+              <div className="grid gap-6 mt-10 lg:grid-cols-2">
+                <Card className="border-border/50 bg-card/60 backdrop-blur-sm">
+                  <CardContent className="p-6 space-y-4">
+                    <div className="flex items-center gap-3">
+                      <Vote className="w-5 h-5 text-primary" />
+                      <div>
+                        <h2 className="text-xl font-semibold">Create Governance Proposal</h2>
+                        <p className="text-sm text-muted-foreground">Admin-only proposal creation for contributor voting.</p>
+                      </div>
+                    </div>
+
+                    {!governanceEnabled ? (
+                      <p className="text-sm text-muted-foreground">Set <code className="text-xs bg-muted/50 px-1 rounded">VITE_GOVERNANCE_VOTING_ADDRESS</code> to enable this section.</p>
+                    ) : (
+                      <>
+                        <Input placeholder="Campaign ID" value={proposalCampaignId} onChange={e => setProposalCampaignId(e.target.value)} />
+                        <Input placeholder="Proposal title" value={proposalTitle} onChange={e => setProposalTitle(e.target.value)} />
+                        <Textarea placeholder="Proposal description" value={proposalDescription} onChange={e => setProposalDescription(e.target.value)} rows={3} />
+                        <div className="grid grid-cols-2 gap-3">
+                          <Input placeholder="Voting days" type="number" min="1" value={proposalVotingDays} onChange={e => setProposalVotingDays(e.target.value)} />
+                          <Input placeholder="Quorum (ETH)" type="number" min="0" step="0.001" value={proposalQuorumEth} onChange={e => setProposalQuorumEth(e.target.value)} />
+                        </div>
+                        <Button onClick={handleCreateProposal} disabled={metaPending === 'proposal'} className="w-full">
+                          {metaPending === 'proposal' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Vote className="w-4 h-4 mr-2" />}
+                          Create Proposal
+                        </Button>
+                        <div className="space-y-2 pt-2 border-t border-border/50">
+                          <p className="text-xs uppercase tracking-wide text-muted-foreground">Eligible campaigns</p>
+                          {approvedCampaigns.slice(0, 4).map(campaign => (
+                            <div key={campaign.id} className="flex items-center justify-between text-sm">
+                              <span>#{campaign.id} {campaign.title}</span>
+                              <Badge variant="outline">{getStatusLabel(campaign.status)}</Badge>
+                            </div>
+                          ))}
+                          {proposals.length > 0 && (
+                            <p className="text-xs text-muted-foreground pt-2">{proposals.length} proposal{proposals.length === 1 ? '' : 's'} created so far.</p>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="border-border/50 bg-card/60 backdrop-blur-sm">
+                  <CardContent className="p-6 space-y-4">
+                    <div className="flex items-center gap-3">
+                      <Landmark className="w-5 h-5 text-chart-3" />
+                      <div>
+                        <h2 className="text-xl font-semibold">Create Milestone</h2>
+                        <p className="text-sm text-muted-foreground">Reserve escrow-backed releases for successful campaigns.</p>
+                      </div>
+                    </div>
+
+                    {!milestoneEnabled ? (
+                      <p className="text-sm text-muted-foreground">Set <code className="text-xs bg-muted/50 px-1 rounded">VITE_MILESTONE_ESCROW_ADDRESS</code> to enable this section.</p>
+                    ) : (
+                      <>
+                        <Input placeholder="Campaign ID" value={milestoneCampaignId} onChange={e => setMilestoneCampaignId(e.target.value)} />
+                        <Input placeholder="Milestone title" value={milestoneTitle} onChange={e => setMilestoneTitle(e.target.value)} />
+                        <Textarea placeholder="Milestone details" value={milestoneDetails} onChange={e => setMilestoneDetails(e.target.value)} rows={3} />
+                        <Input placeholder="Release amount (ETH)" type="number" min="0" step="0.001" value={milestoneAmountEth} onChange={e => setMilestoneAmountEth(e.target.value)} />
+                        <Button onClick={handleCreateMilestone} disabled={metaPending === 'milestone'} className="w-full bg-chart-3 hover:bg-chart-3/90 text-white">
+                          {metaPending === 'milestone' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Landmark className="w-4 h-4 mr-2" />}
+                          Create Milestone
+                        </Button>
+                        <div className="space-y-2 pt-2 border-t border-border/50">
+                          <p className="text-xs uppercase tracking-wide text-muted-foreground">Successful campaigns</p>
+                          {successfulCampaigns.slice(0, 4).map(campaign => (
+                            <div key={campaign.id} className="flex items-center justify-between text-sm">
+                              <span>#{campaign.id} {campaign.title}</span>
+                              <span className="font-mono">{formatETH(campaign.current)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
             </>
           )}
         </motion.div>
