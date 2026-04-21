@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ShieldCheck, CheckCircle, XCircle, Loader2, Clock, AlertCircle } from 'lucide-react';
+import { ShieldCheck, CheckCircle, XCircle, Loader2, Clock, AlertCircle, FileText } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Layout } from '@/components/Layout';
@@ -12,6 +12,7 @@ import {
   formatAddress,
   isBlockchainConfigured,
   ROUTE_PATHS,
+  type Campaign,
 } from '@/lib/index';
 import {
   fetchAllCampaigns,
@@ -19,6 +20,7 @@ import {
   txRejectCampaign,
   formatError,
 } from '@/lib/blockchain';
+import { printAdminCampaignReport } from '@/lib/reportGenerator';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -32,18 +34,28 @@ export default function AdminDashboard() {
   const [rejectReason, setRejectReason] = useState('');
   const [txPending, setTxPending] = useState<number | null>(null);
 
+  const { data: chainCampaigns, isLoading, error, refetch } = useQuery({
+    queryKey: ['campaigns'],
+    queryFn: fetchAllCampaigns,
+    enabled: chainEnabled && isConnected && role === 'admin',
+    staleTime: 10_000,
+  });
+
   if (!isConnected || role !== 'admin') {
     return <Navigate to={ROUTE_PATHS.HOME} replace />;
   }
 
-  const { data: chainCampaigns, isLoading, error, refetch } = useQuery({
-    queryKey: ['campaigns'],
-    queryFn: fetchAllCampaigns,
-    enabled: chainEnabled,
-    staleTime: 10_000,
-  });
-
+  const allCampaigns: Campaign[] = (chainCampaigns ?? []).map(chainToFrontend);
   const pendingCampaigns = (chainCampaigns ?? []).filter(c => c.status === 'pending');
+
+  function handlePrintReport() {
+    const opened = printAdminCampaignReport(allCampaigns);
+    if (!opened) {
+      toast.error('Allow pop-ups in your browser to print the PDF report.');
+      return;
+    }
+    toast.success('Print dialog opened. Choose "Save as PDF" to export the report.');
+  }
 
   async function handleApprove(id: number) {
     setTxPending(id);
@@ -82,16 +94,27 @@ export default function AdminDashboard() {
       <div className="container mx-auto px-4 py-12 max-w-5xl">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
 
-          <div className="flex items-center gap-3 mb-8">
-            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-yellow-500 to-orange-500 flex items-center justify-center">
-              <ShieldCheck className="w-6 h-6 text-white" />
+          <div className="flex flex-col gap-4 mb-8 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-yellow-500 to-orange-500 flex items-center justify-center">
+                <ShieldCheck className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-4xl font-bold bg-gradient-to-r from-yellow-400 to-orange-400 bg-clip-text text-transparent">
+                  Admin Dashboard
+                </h1>
+                <p className="text-muted-foreground text-sm">Review and approve campaign submissions</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-4xl font-bold bg-gradient-to-r from-yellow-400 to-orange-400 bg-clip-text text-transparent">
-                Admin Dashboard
-              </h1>
-              <p className="text-muted-foreground text-sm">Review and approve campaign submissions</p>
-            </div>
+            <Button
+              onClick={handlePrintReport}
+              variant="outline"
+              disabled={!chainEnabled || isLoading || !!error}
+              className="border-yellow-500/40 text-yellow-400 hover:bg-yellow-500/10 hover:text-yellow-300"
+            >
+              <FileText className="w-4 h-4 mr-2" />
+              Print PDF Report
+            </Button>
           </div>
 
           {!chainEnabled && (
