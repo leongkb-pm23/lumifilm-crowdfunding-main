@@ -1,28 +1,62 @@
 import { Layout } from '@/components/Layout';
-import { CampaignCard } from '@/components/CampaignCard';
+import { useState } from 'react';
 import {
   useWalletStore, MOCK_CAMPAIGNS, MOCK_CONTRIBUTIONS,
   formatETH, formatAddress, getStatusLabel, getStatusColor,
   chainToFrontend, isBlockchainConfigured,
-  type Campaign, type Contribution,
+  type Campaign, type CampaignStatus,
 } from '@/lib/index';
 import {
   fetchAllCampaigns, fetchUserContributedIds, queryContribution,
-  queryLumiBalance, weiToEth, formatError,
+  queryLumiBalance,
 } from '@/lib/blockchain';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Wallet, Film, TrendingUp, Calendar, Coins, Loader2, AlertCircle } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Wallet, Film, TrendingUp, Calendar, Coins, Loader2, Search, SlidersHorizontal } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
 import { formatEther } from 'ethers';
 
+interface ContributionListItem {
+  campaign: Campaign;
+  amountEth: number;
+}
+
+const STATUS_FILTER_OPTIONS: Array<{ value: 'all' | CampaignStatus; label: string }> = [
+  { value: 'all', label: 'All statuses' },
+  { value: 'pending', label: 'Pending Approval' },
+  { value: 'active', label: 'Active' },
+  { value: 'successful', label: 'Goal Reached' },
+  { value: 'failed', label: 'Funding Failed' },
+  { value: 'rejected', label: 'Rejected' },
+];
+
+const CONTRIBUTION_STATUS_FILTER_OPTIONS: Array<{ value: 'all' | Exclude<CampaignStatus, 'pending'>; label: string }> = [
+  { value: 'all', label: 'All statuses' },
+  { value: 'active', label: 'Active' },
+  { value: 'successful', label: 'Goal Reached' },
+  { value: 'failed', label: 'Funding Failed' },
+  { value: 'rejected', label: 'Rejected' },
+];
+
 export default function Dashboard() {
   const { isConnected, address, connect } = useWalletStore();
   const chainEnabled = isBlockchainConfigured();
+  const [campaignSearch, setCampaignSearch] = useState('');
+  const [campaignStatusFilter, setCampaignStatusFilter] = useState<'all' | CampaignStatus>('all');
+  const [contributionSearch, setContributionSearch] = useState('');
+  const [contributionStatusFilter, setContributionStatusFilter] = useState<'all' | Exclude<CampaignStatus, 'pending'>>('all');
 
   // ── Chain data ────────────────────────────────────────────────────
   const { data: allChainCampaigns, isLoading: campaignsLoading } = useQuery({
@@ -46,6 +80,19 @@ export default function Dashboard() {
     staleTime: 30_000,
   });
 
+  const { data: contributionMap = {}, isLoading: contributionsLoading } = useQuery({
+    queryKey: ['contributionAmounts', address, contributedIds.join(',')],
+    queryFn: async () => {
+      if (!address) return {};
+      const entries = await Promise.all(
+        contributedIds.map(async campaignId => [campaignId, await queryContribution(campaignId, address)] as const),
+      );
+      return Object.fromEntries(entries);
+    },
+    enabled: chainEnabled && !!address && contributedIds.length > 0,
+    staleTime: 15_000,
+  });
+
   // ── Derived data ──────────────────────────────────────────────────
   const userCampaigns: Campaign[] = chainEnabled
     ? (allChainCampaigns ?? [])
@@ -53,13 +100,40 @@ export default function Dashboard() {
         .map(chainToFrontend)
     : MOCK_CAMPAIGNS.filter(c => c.creator === address);
 
-  const contributedCampaigns: Campaign[] = chainEnabled
+  const contributedCampaigns: ContributionListItem[] = chainEnabled
     ? (allChainCampaigns ?? [])
         .filter(c => contributedIds.includes(c.id))
         .map(chainToFrontend)
-    : MOCK_CAMPAIGNS.filter(c => MOCK_CONTRIBUTIONS.some(co => co.campaignId === c.id));
+        .filter(campaign => campaign.status !== 'pending')
+        .map(campaign => ({
+          campaign,
+          amountEth: parseFloat(formatEther(contributionMap[Number(campaign.id)] ?? 0n)),
+        }))
+        .sort((a, b) => b.amountEth - a.amountEth)
+    : MOCK_CAMPAIGNS
+        .filter(c => MOCK_CONTRIBUTIONS.some(co => co.campaignId === c.id))
+        .filter(campaign => campaign.status !== 'pending')
+        .map(campaign => ({
+          campaign,
+          amountEth: MOCK_CONTRIBUTIONS.find(co => co.campaignId === campaign.id)?.amount ?? 0,
+        }));
 
-  const isLoading = campaignsLoading || idsLoading;
+  const filteredUserCampaigns = userCampaigns.filter(campaign => {
+    const matchesSearch = campaign.title.toLowerCase().includes(campaignSearch.toLowerCase())
+      || campaign.shortDescription.toLowerCase().includes(campaignSearch.toLowerCase());
+    const matchesStatus = campaignStatusFilter === 'all' || campaign.status === campaignStatusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
+  const filteredContributedCampaigns = contributedCampaigns.filter(({ campaign }) => {
+    const matchesSearch = campaign.title.toLowerCase().includes(contributionSearch.toLowerCase())
+      || campaign.shortDescription.toLowerCase().includes(contributionSearch.toLowerCase());
+    const matchesStatus = contributionStatusFilter === 'all' || campaign.status === contributionStatusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
+  const totalContributionEth = filteredContributedCampaigns.reduce((sum, item) => sum + item.amountEth, 0);
+  const isLoading = campaignsLoading || idsLoading || contributionsLoading;
   const lumiBalance = parseFloat(formatEther(lumiWei));
 
   // ── Not connected ─────────────────────────────────────────────────
@@ -115,6 +189,13 @@ export default function Dashboard() {
                 </h1>
                 <p className="text-muted-foreground font-mono text-sm">{formatAddress(address || '')}</p>
               </div>
+              {contributedCampaigns.length > 0 && (
+                <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-4 py-2">
+                  <TrendingUp className="w-4 h-4 text-primary" />
+                  <span className="text-sm text-muted-foreground">Filtered total</span>
+                  <span className="font-mono font-semibold text-foreground">{formatETH(totalContributionEth)}</span>
+                </div>
+              )}
               {chainEnabled && lumiBalance > 0 && (
                 <div className="ml-auto flex items-center gap-2 bg-chart-3/10 border border-chart-3/30 rounded-lg px-4 py-2">
                   <Coins className="w-4 h-4 text-chart-3" />
@@ -144,6 +225,37 @@ export default function Dashboard() {
 
               {/* Campaigns tab */}
               <TabsContent value="campaigns">
+                <Card className="border-border/50 bg-card/50 backdrop-blur-sm mb-6">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <SlidersHorizontal className="w-4 h-4 text-primary" />
+                      <span className="text-sm font-medium">Filter your campaigns</span>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
+                      <div className="relative">
+                        <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+                        <Input
+                          value={campaignSearch}
+                          onChange={e => setCampaignSearch(e.target.value)}
+                          placeholder="Search by campaign title or description"
+                          className="pl-9"
+                        />
+                      </div>
+                      <Select value={campaignStatusFilter} onValueChange={(value: 'all' | CampaignStatus) => setCampaignStatusFilter(value)}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Filter by status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {STATUS_FILTER_OPTIONS.map(option => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </CardContent>
+                </Card>
                 {userCampaigns.length === 0 ? (
                   <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
                     <CardContent className="flex flex-col items-center justify-center py-16">
@@ -162,9 +274,21 @@ export default function Dashboard() {
                       </Button>
                     </CardContent>
                   </Card>
+                ) : filteredUserCampaigns.length === 0 ? (
+                  <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+                    <CardContent className="flex flex-col items-center justify-center py-16">
+                      <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-6">
+                        <Search className="w-10 h-10 text-muted-foreground" />
+                      </div>
+                      <h3 className="text-2xl font-semibold mb-2">No Matching Campaigns</h3>
+                      <p className="text-muted-foreground text-center max-w-md">
+                        Try a different keyword or status filter to find your campaigns faster.
+                      </p>
+                    </CardContent>
+                  </Card>
                 ) : (
                   <div className="space-y-6">
-                    {userCampaigns.map((campaign, index) => (
+                    {filteredUserCampaigns.map((campaign, index) => (
                       <motion.div key={campaign.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: index * 0.1 }}>
                         <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:border-primary/50 transition-colors">
                           <CardContent className="p-6">
@@ -209,6 +333,37 @@ export default function Dashboard() {
 
               {/* Contributions tab */}
               <TabsContent value="contributions">
+                <Card className="border-border/50 bg-card/50 backdrop-blur-sm mb-6">
+                  <CardContent className="p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <SlidersHorizontal className="w-4 h-4 text-primary" />
+                      <span className="text-sm font-medium">Filter your contributions</span>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
+                      <div className="relative">
+                        <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+                        <Input
+                          value={contributionSearch}
+                          onChange={e => setContributionSearch(e.target.value)}
+                          placeholder="Search contributed campaigns"
+                          className="pl-9"
+                        />
+                      </div>
+                      <Select value={contributionStatusFilter} onValueChange={(value: 'all' | Exclude<CampaignStatus, 'pending'>) => setContributionStatusFilter(value)}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Filter by status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {CONTRIBUTION_STATUS_FILTER_OPTIONS.map(option => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </CardContent>
+                </Card>
                 {contributedCampaigns.length === 0 ? (
                   <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
                     <CardContent className="flex flex-col items-center justify-center py-16">
@@ -224,9 +379,21 @@ export default function Dashboard() {
                       </Button>
                     </CardContent>
                   </Card>
+                ) : filteredContributedCampaigns.length === 0 ? (
+                  <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+                    <CardContent className="flex flex-col items-center justify-center py-16">
+                      <div className="w-20 h-20 rounded-full bg-muted/30 flex items-center justify-center mb-6">
+                        <Search className="w-10 h-10 text-muted-foreground" />
+                      </div>
+                      <h3 className="text-2xl font-semibold mb-2">No Matching Contributions</h3>
+                      <p className="text-muted-foreground text-center max-w-md">
+                        No contributions match the current filters. Try widening your search or selecting another status.
+                      </p>
+                    </CardContent>
+                  </Card>
                 ) : (
                   <div className="space-y-4">
-                    {contributedCampaigns.map((campaign, index) => (
+                    {filteredContributedCampaigns.map(({ campaign, amountEth }, index) => (
                       <motion.div key={campaign.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: index * 0.1 }}>
                         <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:border-primary/50 transition-colors">
                           <CardContent className="p-6">
@@ -234,6 +401,9 @@ export default function Dashboard() {
                               <div className="flex-1">
                                 <h3 className="text-xl font-semibold mb-2">{campaign.title}</h3>
                                 <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+                                  <span className="font-mono font-semibold text-foreground">
+                                    You contributed {formatETH(amountEth)}
+                                  </span>
                                   <span className="flex items-center gap-1">
                                     <Calendar className="w-4 h-4" />
                                     Deadline: {new Date(campaign.deadline).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}

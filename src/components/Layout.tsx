@@ -13,7 +13,7 @@ interface LayoutProps {
 
 export function Layout({ children }: LayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { isConnected, address, role, connect, disconnect } = useWalletStore();
+  const { isConnected, address, walletBalanceEth, role, connect, disconnect } = useWalletStore();
   const location = useLocation();
 
   const navLinks = [
@@ -38,6 +38,8 @@ export function Layout({ children }: LayoutProps) {
     }
     return location.pathname.startsWith(path);
   };
+
+  const walletBalanceLabel = walletBalanceEth === null ? null : `${walletBalanceEth.toFixed(4)} ETH`;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -69,9 +71,14 @@ export function Layout({ children }: LayoutProps) {
                 {roleLabel && (
                   <Badge className={`text-xs border ${roleBadgeStyle}`}>{roleLabel}</Badge>
                 )}
-                <span className="text-sm font-mono text-muted-foreground">
-                  {formatAddress(address!)}
-                </span>
+                <div className="flex flex-col items-end leading-tight">
+                  {walletBalanceLabel && (
+                    <span className="text-xs font-medium text-foreground">{walletBalanceLabel}</span>
+                  )}
+                  <span className="text-sm font-mono text-muted-foreground">
+                    {formatAddress(address!)}
+                  </span>
+                </div>
                 <Button
                   variant="outline"
                   size="sm"
@@ -129,9 +136,14 @@ export function Layout({ children }: LayoutProps) {
                         {roleLabel && (
                           <Badge className={`text-xs border ${roleBadgeStyle}`}>{roleLabel}</Badge>
                         )}
-                        <span className="text-sm font-mono text-muted-foreground">
-                          {formatAddress(address!)}
-                        </span>
+                        <div className="flex flex-col leading-tight">
+                          {walletBalanceLabel && (
+                            <span className="text-xs font-medium text-foreground">{walletBalanceLabel}</span>
+                          )}
+                          <span className="text-sm font-mono text-muted-foreground">
+                            {formatAddress(address!)}
+                          </span>
+                        </div>
                       </div>
                       <Button
                         variant="outline"

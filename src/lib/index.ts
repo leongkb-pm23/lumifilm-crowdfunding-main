@@ -8,6 +8,7 @@ import {
   isMetaMaskInstalled,
   isBlockchainConfigured,
   queryAdminAddress,
+  queryWalletEthBalance,
   weiToEth,
   GANACHE_CHAIN_ID,
   formatError,
@@ -54,6 +55,7 @@ export interface WalletState {
   isConnected: boolean;
   address: string | null;
   chainId: number | null;
+  walletBalanceEth: number | null;
   role: UserRole | null;
   rolePending: boolean;
   ageVerified: boolean;
@@ -242,9 +244,32 @@ async function detectRole(address: string): Promise<UserRole | null> {
   return null;
 }
 
-async function doConnect(): Promise<{ address: string; chainId: number; role: UserRole | null }> {
+async function readWalletBalance(address: string): Promise<number | null> {
+  if (!isMetaMaskInstalled()) return null;
+  try {
+    return weiToEth(await queryWalletEthBalance(address));
+  } catch {
+    return null;
+  }
+}
+
+async function buildWalletSession(address: string, chainId: number): Promise<{
+  address: string;
+  chainId: number;
+  role: UserRole | null;
+  walletBalanceEth: number | null;
+}> {
+  const [role, walletBalanceEth] = await Promise.all([
+    detectRole(address),
+    readWalletBalance(address),
+  ]);
+
+  return { address, chainId, role, walletBalanceEth };
+}
+
+async function doConnect(): Promise<{ address: string; chainId: number; role: UserRole | null; walletBalanceEth: number | null }> {
   if (!isMetaMaskInstalled()) {
-    return { address: '0xDemoUser000000000000000000000000000000', chainId: GANACHE_CHAIN_ID, role: null };
+    return { address: '0xDemoUser000000000000000000000000000000', chainId: GANACHE_CHAIN_ID, role: null, walletBalanceEth: null };
   }
   const address = await requestAccount();
   let chainId = await getChainId();
@@ -252,14 +277,14 @@ async function doConnect(): Promise<{ address: string; chainId: number; role: Us
     await switchToGanache();
     chainId = await getChainId();
   }
-  const role = await detectRole(address);
-  return { address, chainId, role };
+  return buildWalletSession(address, chainId);
 }
 
 export const useWalletStore = create<WalletState>((set, get) => ({
   isConnected: false,
   address: null,
   chainId: null,
+  walletBalanceEth: null,
   role: null,
   rolePending: false,
   ageVerified: false,
@@ -273,33 +298,47 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     }
     set({ isConnecting: true, error: null });
     doConnect()
-      .then(({ address, chainId, role }) =>
-        set({ isConnected: true, address, chainId, isConnecting: false, role, rolePending: role === null }))
+      .then(({ address, chainId, role, walletBalanceEth }) =>
+        set({ isConnected: true, address, chainId, walletBalanceEth, isConnecting: false, role, rolePending: role === null }))
       .catch((err: unknown) => set({ isConnecting: false, error: formatError(err) }));
   },
-  disconnect: () => set({ isConnected: false, address: null, chainId: null, error: null, role: null, rolePending: false }),
+  disconnect: () => set({ isConnected: false, address: null, chainId: null, walletBalanceEth: null, error: null, role: null, rolePending: false }),
   confirmAge: () => {
     set({ ageVerified: true, ageVerificationPending: false, isConnecting: true, error: null });
     doConnect()
-      .then(({ address, chainId, role }) =>
-        set({ isConnected: true, address, chainId, isConnecting: false, role, rolePending: role === null }))
+      .then(({ address, chainId, role, walletBalanceEth }) =>
+        set({ isConnected: true, address, chainId, walletBalanceEth, isConnecting: false, role, rolePending: role === null }))
       .catch((err: unknown) => set({ isConnecting: false, error: formatError(err) }));
   },
   cancelAgeVerification: () => set({ ageVerificationPending: false }),
   setRole: (role: UserRole) => set({ role, rolePending: false }),
   syncAccount: (address: string | null) => {
     if (!address) {
-      set({ isConnected: false, address: null, chainId: null, role: null, rolePending: false });
+      set({ isConnected: false, address: null, chainId: null, walletBalanceEth: null, role: null, rolePending: false });
     } else {
-      getCurrentAccount().then(current => {
+      Promise.all([getCurrentAccount(), getChainId().catch(() => null)]).then(([current, chainId]) => {
         if (current) {
-          set({ address: current, role: null, rolePending: false });
-          detectRole(current).then(role => {
-            if (role) set({ role });
-            else set({ rolePending: true });
+          buildWalletSession(current, chainId ?? GANACHE_CHAIN_ID).then(({ role, walletBalanceEth }) => {
+            set({
+              isConnected: true,
+              address: current,
+              chainId: chainId ?? GANACHE_CHAIN_ID,
+              walletBalanceEth,
+              role,
+              rolePending: role === null,
+            });
+          }).catch(() => {
+            set({
+              isConnected: true,
+              address: current,
+              chainId: chainId ?? GANACHE_CHAIN_ID,
+              walletBalanceEth: null,
+              role: null,
+              rolePending: true,
+            });
           });
         } else {
-          set({ isConnected: false, address: null, chainId: null, role: null, rolePending: false });
+          set({ isConnected: false, address: null, chainId: null, walletBalanceEth: null, role: null, rolePending: false });
         }
       });
     }

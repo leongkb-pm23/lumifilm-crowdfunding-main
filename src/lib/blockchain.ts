@@ -72,6 +72,10 @@ export async function getCurrentAccount(): Promise<string | null> {
   return accounts[0] ?? null;
 }
 
+export async function queryWalletEthBalance(address: string): Promise<bigint> {
+  return getProvider().getBalance(address);
+}
+
 export async function getChainId(): Promise<number> {
   const hex = await getEthereum().request({ method: 'eth_chainId' }) as string;
   return parseInt(hex, 16);
