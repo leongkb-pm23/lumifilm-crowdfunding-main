@@ -1,7 +1,7 @@
 import { useParams, Navigate, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Clock, User, Target, TrendingUp, Loader2, Vote, Landmark, FileCheck } from 'lucide-react';
+import { Clock, User, Target, TrendingUp, Loader2, Vote, Landmark, FileCheck, Award, Sparkles } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Layout } from '@/components/Layout';
@@ -12,8 +12,10 @@ import {
   formatETH,
   formatAddress,
   getDaysLeft,
+  getLoyaltySummary,
   getStatusColor,
   getStatusLabel,
+  LUMI_RATE,
   useWalletStore,
   isBlockchainConfigured,
   ROUTE_PATHS,
@@ -22,6 +24,7 @@ import {
 import {
   fetchCampaign,
   queryContribution,
+  queryLumiBalance,
   queryLumiClaimed,
   queryReturnPool,
   queryReturnClaimed,
@@ -95,6 +98,13 @@ export default function CampaignDetail() {
     staleTime: 15_000,
   });
 
+  const { data: lumiBalanceWei = 0n } = useQuery({
+    queryKey: ['lumiBalance', address],
+    queryFn: () => queryLumiBalance(address!),
+    enabled: chainEnabled && !!address,
+    staleTime: 30_000,
+  });
+
   const { data: returnPoolWei = 0n } = useQuery({
     queryKey: ['returnPool', id],
     queryFn: () => queryReturnPool(campaignId),
@@ -151,9 +161,12 @@ export default function CampaignDetail() {
   });
 
   const userContributionEth = weiToEth(userContributionWei);
+  const lumiBalance = weiToEth(lumiBalanceWei);
+  const loyalty = getLoyaltySummary(lumiBalance);
   const isCreator = !!address && !!campaign && address.toLowerCase() === campaign.creator.toLowerCase();
   const isAdmin = role === 'admin';
   const isContributor = chainEnabled ? userContributionWei > 0n : true;
+  const potentialLumiReward = userContributionEth > 0 ? Math.floor(userContributionEth * LUMI_RATE) : 0;
 
   const claimableReturnWei = returnPoolWei > 0n && chainCampaign && userContributionWei > 0n
     ? (userContributionWei * returnPoolWei) / chainCampaign.raisedWei - returnClaimedWei
@@ -333,7 +346,7 @@ export default function CampaignDetail() {
             <div className="grid lg:grid-cols-3 gap-8">
               <div className="lg:col-span-2 space-y-8">
                 <div>
-                  <h1 className="text-4xl md:text-5xl font-bold mb-4 bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+                  <h1 className="text-4xl md:text-5xl font-bold mb-4 break-all bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
                     {campaign.title}
                   </h1>
                   <div className="flex items-center gap-2 text-muted-foreground">
@@ -348,7 +361,7 @@ export default function CampaignDetail() {
 
                 <Card className="p-6 bg-card/60 backdrop-blur-md border-border/50">
                   <h2 className="text-xl font-semibold mb-4">About This Project</h2>
-                  <p className="text-muted-foreground leading-relaxed whitespace-pre-line">{campaign.description}</p>
+                  <p className="text-muted-foreground leading-relaxed whitespace-pre-line break-all">{campaign.description}</p>
                 </Card>
 
                 {chainEnabled && isConnected && userContributionEth > 0 && (

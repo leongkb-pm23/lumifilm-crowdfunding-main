@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Card } from '@/components/ui/card';
+import { normalizeCampaignDescription, normalizeCampaignTitle } from '@/lib/utils';
 
 export default function CreateCampaign() {
   const navigate = useNavigate();
@@ -26,31 +27,33 @@ export default function CreateCampaign() {
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const validateForm = () => {
+  const validateForm = (data = formData) => {
     const newErrors: Record<string, string> = {};
+    const normalizedTitle = normalizeCampaignTitle(data.title);
+    const normalizedDescription = normalizeCampaignDescription(data.description);
 
-    if (!formData.title.trim()) {
+    if (!normalizedTitle) {
       newErrors.title = 'Campaign title is required';
-    } else if (formData.title.length < 5) {
+    } else if (normalizedTitle.length < 5) {
       newErrors.title = 'Title must be at least 5 characters';
     }
 
-    if (!formData.description.trim()) {
+    if (!normalizedDescription) {
       newErrors.description = 'Description is required';
-    } else if (formData.description.length < 50) {
+    } else if (normalizedDescription.length < 50) {
       newErrors.description = 'Description must be at least 50 characters';
     }
 
-    if (!formData.goal) {
+    if (!data.goal) {
       newErrors.goal = 'Funding goal is required';
-    } else if (parseFloat(formData.goal) <= 0) {
+    } else if (parseFloat(data.goal) <= 0) {
       newErrors.goal = 'Goal must be greater than 0';
     }
 
-    if (!formData.deadline) {
+    if (!data.deadline) {
       newErrors.deadline = 'Deadline is required';
     } else {
-      const selectedDate = new Date(formData.deadline);
+      const selectedDate = new Date(data.deadline);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       if (selectedDate <= today) {
@@ -65,7 +68,17 @@ export default function CreateCampaign() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!validateForm()) return;
+    const normalizedTitle = normalizeCampaignTitle(formData.title);
+    const normalizedDescription = normalizeCampaignDescription(formData.description);
+    const sanitizedFormData = {
+      ...formData,
+      title: normalizedTitle,
+      description: normalizedDescription,
+    };
+
+    setFormData(sanitizedFormData);
+
+    if (!validateForm(sanitizedFormData)) return;
 
     setIsSubmitting(true);
     setTxError(null);
@@ -73,10 +86,10 @@ export default function CreateCampaign() {
     try {
       if (chainEnabled) {
         const newId = await txCreateCampaign(
-          formData.title,
-          formData.description,
-          formData.goal,
-          formData.deadline,
+          sanitizedFormData.title,
+          sanitizedFormData.description,
+          sanitizedFormData.goal,
+          sanitizedFormData.deadline,
         );
         setShowSuccess(true);
         setTimeout(() => {
@@ -202,6 +215,9 @@ export default function CreateCampaign() {
                     placeholder="Enter your film title"
                     className="bg-background/50 border-border/50 focus:border-accent transition-colors"
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Extra spacing is cleaned when you submit, so the saved title stays tidy.
+                  </p>
                   {errors.title && (
                     <p className="text-destructive text-sm mt-1">{errors.title}</p>
                   )}
@@ -220,6 +236,9 @@ export default function CreateCampaign() {
                     rows={6}
                     className="bg-background/50 border-border/50 focus:border-accent transition-colors resize-none"
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Enter and spacing are preserved while typing, then cleaned on submit so the saved description displays neatly.
+                  </p>
                   {errors.description && (
                     <p className="text-destructive text-sm mt-1">{errors.description}</p>
                   )}

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { IMAGES } from '@/assets/images';
+import { getShortDescription, normalizeCampaignDescription, normalizeCampaignTitle } from '@/lib/utils';
 import {
   requestAccount,
   getCurrentAccount,
@@ -29,6 +30,7 @@ export const ROUTE_PATHS = {
 export type UserRole = 'investor' | 'organiser' | 'admin';
 
 export type CampaignStatus = 'pending' | 'active' | 'successful' | 'failed' | 'rejected';
+export type LoyaltyTier = 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
 
 export interface Campaign {
   id: string;
@@ -191,6 +193,41 @@ export const formatAddress = (address: string): string => {
 };
 
 export const LUMI_RATE = 100; // 100 LUMI per ETH (1 LUMI per 0.01 ETH)
+
+const LOYALTY_TIERS: Array<{
+  tier: LoyaltyTier;
+  min: number;
+  nextMin: number | null;
+  badge: string;
+  perk: string;
+}> = [
+  { tier: 'Bronze', min: 0, nextMin: 100, badge: 'Rising Backer', perk: 'Supporter recognition across the platform' },
+  { tier: 'Silver', min: 100, nextMin: 500, badge: 'Film Patron', perk: 'Priority access to supporter-only updates' },
+  { tier: 'Gold', min: 500, nextMin: 1000, badge: 'Producer Circle', perk: 'Early access perks for featured campaigns' },
+  { tier: 'Platinum', min: 1000, nextMin: null, badge: 'Lumi Vanguard', perk: 'Top-tier recognition and future VIP perks' },
+];
+
+export function getLoyaltyTier(lumiBalance: number): LoyaltyTier {
+  const match = [...LOYALTY_TIERS].reverse().find(tier => lumiBalance >= tier.min);
+  return match?.tier ?? 'Bronze';
+}
+
+export function getLoyaltySummary(lumiBalance: number) {
+  const current = [...LOYALTY_TIERS].reverse().find(tier => lumiBalance >= tier.min) ?? LOYALTY_TIERS[0];
+  const progress = current.nextMin === null
+    ? 100
+    : Math.min(100, Math.max(0, ((lumiBalance - current.min) / (current.nextMin - current.min)) * 100));
+
+  return {
+    tier: current.tier,
+    badge: current.badge,
+    perk: current.perk,
+    currentMin: current.min,
+    nextMin: current.nextMin,
+    progress,
+    lumiToNextTier: current.nextMin === null ? 0 : Math.max(0, current.nextMin - lumiBalance),
+  };
+}
 
 export const getDaysLeft = (deadline: string): number => {
   const now = new Date();
@@ -360,14 +397,12 @@ export function getImageForCampaign(id: number): string {
 export function chainToFrontend(c: ChainCampaign): Campaign {
   const goal = weiToEth(c.goalWei);
   const current = weiToEth(c.raisedWei);
-  const words = c.description.split(/\s+/);
-  const shortDescription = words.length > 20
-    ? words.slice(0, 20).join(' ') + '...'
-    : c.description;
+  const description = normalizeCampaignDescription(c.description);
+  const shortDescription = getShortDescription(description);
   return {
     id: String(c.id),
-    title: c.title,
-    description: c.description,
+    title: normalizeCampaignTitle(c.title),
+    description,
     shortDescription,
     creator: c.creator,
     goal,

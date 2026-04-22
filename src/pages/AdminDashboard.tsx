@@ -266,7 +266,7 @@ export default function AdminDashboard() {
                                   <span className="text-xs font-mono text-muted-foreground">#{chainCampaign.id}</span>
                                   <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/40">Pending Approval</Badge>
                                 </div>
-                                <h3 className="text-xl font-semibold">{campaign.title}</h3>
+                                <h3 className="text-xl font-semibold break-all">{campaign.title}</h3>
                                 <p className="text-sm text-muted-foreground font-mono mt-1">
                                   Creator: {formatAddress(campaign.creator)}
                                 </p>
@@ -280,7 +280,7 @@ export default function AdminDashboard() {
                               </div>
                             </div>
 
-                            <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3">
+                            <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3 break-all">
                               {campaign.description}
                             </p>
 

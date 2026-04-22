@@ -3,7 +3,7 @@ import { useState } from 'react';
 import {
   useWalletStore, MOCK_CAMPAIGNS, MOCK_CONTRIBUTIONS,
   formatETH, formatAddress, getStatusLabel, getStatusColor,
-  chainToFrontend, isBlockchainConfigured,
+  chainToFrontend, getLoyaltySummary, isBlockchainConfigured,
   type Campaign, type CampaignStatus,
 } from '@/lib/index';
 import {
@@ -23,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Wallet, Film, TrendingUp, Calendar, Coins, Loader2, Search, SlidersHorizontal } from 'lucide-react';
+import { Wallet, Film, TrendingUp, Calendar, Coins, Loader2, Search, SlidersHorizontal, Award, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
 import { formatEther } from 'ethers';
@@ -135,6 +135,14 @@ export default function Dashboard() {
   const totalContributionEth = filteredContributedCampaigns.reduce((sum, item) => sum + item.amountEth, 0);
   const isLoading = campaignsLoading || idsLoading || contributionsLoading;
   const lumiBalance = parseFloat(formatEther(lumiWei));
+  const successfulBackedCount = contributedCampaigns.filter(({ campaign }) => campaign.status === 'successful').length;
+  const loyalty = getLoyaltySummary(lumiBalance);
+  const unlockedBadges = [
+    contributedCampaigns.length > 0 ? 'First Backer' : null,
+    successfulBackedCount > 0 ? 'Goal Hunter' : null,
+    contributedCampaigns.length >= 3 ? 'Repeat Supporter' : null,
+    lumiBalance >= 500 ? loyalty.badge : null,
+  ].filter(Boolean) as string[];
 
   // ── Not connected ─────────────────────────────────────────────────
   if (!isConnected) {
@@ -204,6 +212,80 @@ export default function Dashboard() {
               )}
             </div>
           </div>
+
+          <Card className="border-border/50 bg-card/50 backdrop-blur-sm mb-8 overflow-hidden">
+            <CardContent className="p-6">
+              <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="w-12 h-12 rounded-2xl bg-chart-3/15 border border-chart-3/30 flex items-center justify-center">
+                      <Award className="w-6 h-6 text-chart-3" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Loyalty Summary</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="text-2xl font-semibold">{loyalty.tier} Supporter</h2>
+                        <Badge className="bg-chart-3/15 text-chart-3 border border-chart-3/30">{loyalty.badge}</Badge>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <div className="rounded-xl border border-border/50 bg-background/30 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">LUMI Balance</p>
+                      <p className="mt-2 text-2xl font-semibold text-chart-3">{lumiBalance.toFixed(2)}</p>
+                    </div>
+                    <div className="rounded-xl border border-border/50 bg-background/30 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Campaigns Backed</p>
+                      <p className="mt-2 text-2xl font-semibold">{contributedCampaigns.length}</p>
+                    </div>
+                    <div className="rounded-xl border border-border/50 bg-background/30 p-4">
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Successful Backings</p>
+                      <p className="mt-2 text-2xl font-semibold">{successfulBackedCount}</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-border/50 bg-background/30 p-4">
+                    <div className="flex items-center justify-between gap-3 mb-2">
+                      <p className="text-sm font-medium">Tier Progress</p>
+                      <p className="text-xs text-muted-foreground">
+                        {loyalty.nextMin === null
+                          ? 'Top loyalty tier reached'
+                          : `${loyalty.lumiToNextTier.toFixed(0)} LUMI to ${loyalty.nextMin} `}
+                      </p>
+                    </div>
+                    <Progress value={loyalty.progress} className="h-2" />
+                    <p className="mt-3 text-sm text-muted-foreground">{loyalty.perk}</p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-border/50 bg-background/30 p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Sparkles className="w-4 h-4 text-chart-3" />
+                      <p className="text-sm font-medium">Unlocked Recognition</p>
+                    </div>
+                    {unlockedBadges.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {unlockedBadges.map(badge => (
+                          <Badge key={badge} variant="outline" className="border-chart-3/30 bg-chart-3/10 text-chart-3">
+                            {badge}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Back a campaign to earn your first loyalty badge.</p>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-border/50 bg-background/30 p-4">
+                    <p className="text-sm font-medium mb-3">Current Loyalty Perk</p>
+                    <p className="text-sm text-muted-foreground">{loyalty.perk}</p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           {isLoading ? (
             <div className="flex items-center justify-center py-24 gap-3">
@@ -299,8 +381,8 @@ export default function Dashboard() {
                               <div className="flex-1 space-y-4">
                                 <div className="flex items-start justify-between gap-4">
                                   <div>
-                                    <h3 className="text-2xl font-semibold mb-2">{campaign.title}</h3>
-                                    <p className="text-muted-foreground line-clamp-2">{campaign.shortDescription}</p>
+                                    <h3 className="text-2xl font-semibold mb-2 break-all">{campaign.title}</h3>
+                                    <p className="text-muted-foreground line-clamp-2 break-all">{campaign.shortDescription}</p>
                                   </div>
                                   <Badge className={getStatusColor(campaign.status)}>{getStatusLabel(campaign.status)}</Badge>
                                 </div>

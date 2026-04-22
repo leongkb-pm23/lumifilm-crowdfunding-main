@@ -42,10 +42,10 @@ export function CampaignCard({ campaign }: CampaignCardProps) {
 
           <div className="p-6 space-y-4">
             <div>
-              <h3 className="text-xl font-semibold text-foreground mb-2 line-clamp-1 group-hover:text-accent transition-colors">
+              <h3 className="text-xl font-semibold text-foreground mb-2 line-clamp-1 break-all group-hover:text-accent transition-colors">
                 {campaign.title}
               </h3>
-              <p className="text-sm text-muted-foreground line-clamp-2">
+              <p className="text-sm text-muted-foreground line-clamp-2 break-all">
                 {campaign.shortDescription}
               </p>
             </div>

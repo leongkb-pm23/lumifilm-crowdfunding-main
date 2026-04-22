@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Menu, X } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { useWalletStore, formatAddress, ROUTE_PATHS } from '@/lib/index';
+import { useWalletStore, formatAddress, getLoyaltySummary, ROUTE_PATHS } from '@/lib/index';
+import { isBlockchainConfigured, queryLumiBalance } from '@/lib/blockchain';
 import { AgeVerificationModal } from '@/components/AgeVerificationModal';
 import { motion, AnimatePresence } from 'framer-motion';
+import { formatEther } from 'ethers';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -15,6 +18,14 @@ export function Layout({ children }: LayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { isConnected, address, walletBalanceEth, role, connect, disconnect } = useWalletStore();
   const location = useLocation();
+  const chainEnabled = isBlockchainConfigured();
+
+  const { data: lumiWei = 0n } = useQuery({
+    queryKey: ['lumiBalance', address],
+    queryFn: () => queryLumiBalance(address!),
+    enabled: chainEnabled && isConnected && !!address,
+    staleTime: 30_000,
+  });
 
   const navLinks = [
     { label: 'Home', path: ROUTE_PATHS.HOME },
@@ -40,6 +51,8 @@ export function Layout({ children }: LayoutProps) {
   };
 
   const walletBalanceLabel = walletBalanceEth === null ? null : `${walletBalanceEth.toFixed(4)} ETH`;
+  const lumiBalance = parseFloat(formatEther(lumiWei));
+  const loyalty = getLoyaltySummary(lumiBalance);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -71,9 +84,17 @@ export function Layout({ children }: LayoutProps) {
                 {roleLabel && (
                   <Badge className={`text-xs border ${roleBadgeStyle}`}>{roleLabel}</Badge>
                 )}
+                {chainEnabled && (
+                  <Badge variant="outline" className="text-xs border-chart-3/40 text-chart-3 bg-chart-3/10">
+                    {loyalty.tier}
+                  </Badge>
+                )}
                 <div className="flex flex-col items-end leading-tight">
                   {walletBalanceLabel && (
                     <span className="text-xs font-medium text-foreground">{walletBalanceLabel}</span>
+                  )}
+                  {chainEnabled && (
+                    <span className="text-[11px] text-chart-3">{loyalty.badge}</span>
                   )}
                   <span className="text-sm font-mono text-muted-foreground">
                     {formatAddress(address!)}
@@ -132,17 +153,25 @@ export function Layout({ children }: LayoutProps) {
                 <div className="pt-2 border-t border-border/40">
                   {isConnected ? (
                     <div className="flex flex-col gap-2">
-                      <div className="flex items-center gap-2">
-                        {roleLabel && (
-                          <Badge className={`text-xs border ${roleBadgeStyle}`}>{roleLabel}</Badge>
+                    <div className="flex items-center gap-2">
+                      {roleLabel && (
+                        <Badge className={`text-xs border ${roleBadgeStyle}`}>{roleLabel}</Badge>
+                      )}
+                      {chainEnabled && (
+                        <Badge variant="outline" className="text-xs border-chart-3/40 text-chart-3 bg-chart-3/10">
+                          {loyalty.tier}
+                        </Badge>
+                      )}
+                      <div className="flex flex-col leading-tight">
+                        {walletBalanceLabel && (
+                          <span className="text-xs font-medium text-foreground">{walletBalanceLabel}</span>
                         )}
-                        <div className="flex flex-col leading-tight">
-                          {walletBalanceLabel && (
-                            <span className="text-xs font-medium text-foreground">{walletBalanceLabel}</span>
-                          )}
-                          <span className="text-sm font-mono text-muted-foreground">
-                            {formatAddress(address!)}
-                          </span>
+                        {chainEnabled && (
+                          <span className="text-[11px] text-chart-3">{loyalty.badge}</span>
+                        )}
+                        <span className="text-sm font-mono text-muted-foreground">
+                          {formatAddress(address!)}
+                        </span>
                         </div>
                       </div>
                       <Button
