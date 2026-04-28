@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useWalletStore, formatAddress, getLoyaltySummary, ROUTE_PATHS } from '@/lib/index';
-import { isBlockchainConfigured, queryLumiBalance } from '@/lib/blockchain';
+import { isBlockchainConfigured, queryLumiBalance, queryWalletEthBalance, weiToEth } from '@/lib/blockchain';
 import { AgeVerificationModal } from '@/components/AgeVerificationModal';
 import { motion, AnimatePresence } from 'framer-motion';
 import { formatEther } from 'ethers';
@@ -25,6 +25,15 @@ export function Layout({ children }: LayoutProps) {
     queryFn: () => queryLumiBalance(address!),
     enabled: chainEnabled && isConnected && !!address,
     staleTime: 30_000,
+  });
+
+  const { data: walletBalanceWei } = useQuery({
+    queryKey: ['walletBalance', address],
+    queryFn: () => queryWalletEthBalance(address!),
+    enabled: chainEnabled && isConnected && !!address,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
+    refetchOnWindowFocus: true,
   });
 
   const navLinks = [
@@ -50,7 +59,10 @@ export function Layout({ children }: LayoutProps) {
     return location.pathname.startsWith(path);
   };
 
-  const walletBalanceLabel = walletBalanceEth === null ? null : `${walletBalanceEth.toFixed(4)} ETH`;
+  const liveWalletBalanceEth = walletBalanceWei !== undefined
+    ? weiToEth(walletBalanceWei)
+    : walletBalanceEth;
+  const walletBalanceLabel = liveWalletBalanceEth === null ? null : `${liveWalletBalanceEth.toFixed(4)} ETH`;
   const lumiBalance = parseFloat(formatEther(lumiWei));
   const loyalty = getLoyaltySummary(lumiBalance);
 
